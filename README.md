@@ -97,6 +97,10 @@ Output: `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (most modern p
 
 For the Play Store, create your own keystore and signing config; the template build is signed with the debug key, which is fine for sideloading.
 
+### Distribute without the Play Store
+
+Upload the APK in the backend's admin dashboard (**Settings → Mobile app**). Users then open `https://your-server.example.com/app` on their phone, tap **Download for Android**, and install it (Android asks to allow "Install unknown apps" once).
+
 ## Permissions
 
 | Permission | Why |
