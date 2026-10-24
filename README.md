@@ -11,6 +11,7 @@ Android app for helmet compliance checks. Record a short video in HD or pick one
 ## Features
 
 - **In-app HD camera**: 1080p / 30 fps, tap-to-focus, pinch zoom, torch, live low-light hint, 2-minute auto-stop.
+- **Live detection boxes**: green (helmet) and red (no helmet) boxes drawn on the preview, also while recording, with a count and a "move closer" hint. The model runs on the phone (ONNX Runtime) and is downloaded from the backend on first use, so model updates need no new app release. The boxes are a framing guide; the final result comes from the server.
 - **Gallery upload**: size check before upload, with clear messages.
 - **Live progress**: upload progress, then background analysis with automatic status polling.
 - **Clear verdict**: one-glance result (safe / violations), counts, and filters.
@@ -41,6 +42,7 @@ flowchart LR
 | State | `provider` |
 | Networking | `dio` |
 | Camera / picker | `camera`, `image_picker` |
+| On-device AI | `onnxruntime` (YOLOv8 ONNX, downloaded from the backend) |
 | Storage | `shared_preferences` |
 | Sharing | `share_plus`, `path_provider` |
 
@@ -56,6 +58,10 @@ lib/
     auth_state.dart    login state and onboarding flag
     models.dart        video, detection and result models
     limits.dart        upload size cap and recording bitrate
+  live/
+    live_detector.dart    YUV frame -> model input, ONNX inference, box decoding + NMS
+    model_store.dart      downloads / updates the on-device model from the backend
+    boxes_overlay.dart    paints the boxes over the camera preview
   screens/
     welcome_screen.dart   onboarding
     login_screen.dart     sign in / register
@@ -113,6 +119,8 @@ In the backend's admin dashboard (**Settings → Mobile app**), upload the APK (
 - Android only for now; recording is limited to 2 minutes and uploads to 95 MB.
 - Detection accuracy depends on light, distance and focus. Follow the in-app tips for best results.
 - Needs an internet connection; analysis runs on the server.
+- Live boxes download a ~45 MB model on first use (Wi-Fi recommended), run on ARM phones only (the x86 emulator is not supported), use more battery, and are less exact than the server analysis.
+- Recording is portrait-only so the boxes line up with the preview.
 
 ## Roadmap
 

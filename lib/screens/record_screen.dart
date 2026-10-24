@@ -2,13 +2,20 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_theme.dart';
+import '../core/api.dart';
 import '../core/limits.dart';
+import '../live/boxes_overlay.dart';
+import '../live/live_detector.dart';
+import '../live/model_store.dart';
 
-/// In-app camera: 1080p / 30 fps, tap-to-focus, pinch zoom, torch, 2-minute limit.
-/// Pops with the recorded file path.
+/// In-app camera: 1080p / 30 fps, tap-to-focus, pinch zoom, torch, 2-minute limit, and live detection boxes
+/// (helmet / no helmet) drawn over the preview, also while recording. Pops with the recorded file path.
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
 
@@ -19,6 +26,9 @@ class RecordScreen extends StatefulWidget {
 class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver {
   static const maxSeconds = 120;
   static const _lowLightLuma = 70; // mean brightness (0-255) under which we suggest the torch
+  static const _liveEveryMs = 150; // at most ~6 detections per second keeps the phone cool
+  static const _tooFarHeight = 0.045; // box shorter than 4.5% of the frame height = person is too far away
+  static const _liveKey = 'live_boxes';
 
   CameraController? _controller;
   String? _error;
@@ -31,18 +41,35 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   DateTime _lastLuma = DateTime.fromMillisecondsSinceEpoch(0);
   String _quality = '';
 
+  // live detection
+  SharedPreferences? _prefs;
+  bool _liveEnabled = true;
+  LiveDetector? _detector;
+  List<LiveBox> _boxes = const [];
+  bool _preparing = false;
+  double? _modelProgress;
+  String? _liveNote;
+  bool _inferBusy = false;
+  DateTime _lastInfer = DateTime.fromMillisecondsSinceEpoch(0);
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]); // boxes are mapped for portrait
     _init();
+    _loadLive();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     _timer?.cancel();
     _controller?.dispose();
+    final d = _detector;
+    _detector = null;
+    if (d != null) Future<void>.delayed(const Duration(seconds: 2), d.dispose); // let a running inference finish
     super.dispose();
   }
 
@@ -52,7 +79,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       final c = _controller;
       _controller = null;
       c?.dispose();
-      if (mounted) setState(() {});
+      if (mounted) setState(() => _boxes = const []);
     } else if (state == AppLifecycleState.resumed && _controller == null && !_recording) {
       _init();
     }
@@ -95,7 +122,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         _controller = c;
         _error = null;
       });
-      _watchLight(c);
+      _watchFrames(c);
     } on CameraException catch (e) {
       if (mounted) {
         setState(() => _error = e.code == 'CameraAccessDenied'
@@ -107,11 +134,66 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     }
   }
 
-  /// Samples the live preview about once a second (only before recording) to warn about low light.
-  void _watchLight(CameraController c) {
-    c.startImageStream((image) {
-      final now = DateTime.now();
-      if (now.difference(_lastLuma).inMilliseconds < 1000) return;
+  // ---------- live detection ----------
+  Future<void> _loadLive() async {
+    _prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _liveEnabled = _prefs!.getBool(_liveKey) ?? true);
+    _prepareLive();
+  }
+
+  /// Downloads (first time / after a model update) and loads the on-device model. The camera works meanwhile.
+  Future<void> _prepareLive() async {
+    if (!_liveEnabled || _detector != null || _preparing || _prefs == null) return;
+    final api = context.read<Api>();
+    setState(() {
+      _preparing = true;
+      _modelProgress = null;
+      _liveNote = null;
+    });
+    try {
+      final model = await LiveModelStore.ensure(api, _prefs!, (p) {
+        if (mounted) setState(() => _modelProgress = p);
+      });
+      if (model == null) {
+        _liveNote = 'Live boxes need an internet connection the first time.';
+      } else {
+        final d = await LiveDetector.load(model.file, model.imgsz);
+        if (!mounted) {
+          d.dispose();
+          return;
+        }
+        _detector = d;
+      }
+    } catch (e) {
+      _liveNote = 'Live boxes are not available on this phone.';
+    } finally {
+      if (mounted) {
+        setState(() {
+          _preparing = false;
+          _modelProgress = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _toggleLive() async {
+    final on = !_liveEnabled;
+    setState(() {
+      _liveEnabled = on;
+      if (!on) _boxes = const [];
+    });
+    await _prefs?.setBool(_liveKey, on);
+    if (on) _prepareLive();
+  }
+
+  /// Called for every camera frame (before recording via the image stream, during recording via the recorder).
+  void _onFrame(CameraImage image) {
+    final c = _controller;
+    if (c == null || !mounted) return;
+    final now = DateTime.now();
+
+    if (!_recording && now.difference(_lastLuma).inMilliseconds >= 1000) {
       _lastLuma = now;
       final y = image.planes.first.bytes;
       var sum = 0, n = 0;
@@ -120,10 +202,38 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         n++;
       }
       final dark = n > 0 && sum / n < _lowLightLuma;
-      if (mounted && dark != _lowLight) setState(() => _lowLight = dark);
-    }).catchError((_) {}); // some devices cannot stream; the hint is optional
+      if (dark != _lowLight) setState(() => _lowLight = dark);
+    }
+
+    final detector = _detector;
+    if (!_liveEnabled || detector == null || _inferBusy || now.difference(_lastInfer).inMilliseconds < _liveEveryMs) return;
+    final frame = YuvFrame.fromCameraImage(image);
+    if (frame == null) {
+      _detector = null;
+      setState(() => _liveNote = 'Live boxes are not supported by this camera.');
+      return;
+    }
+    _inferBusy = true;
+    _lastInfer = now;
+    detector.detect(frame, c.description.sensorOrientation).then((boxes) {
+      if (mounted && _liveEnabled) setState(() => _boxes = boxes);
+    }).catchError((Object e) {
+      _detector = null; // do not keep failing every frame
+      if (mounted) {
+        setState(() {
+          _boxes = const [];
+          _liveNote = 'Live boxes stopped on this phone.';
+        });
+      }
+    }).whenComplete(() => _inferBusy = false);
   }
 
+  /// Samples the live preview (light check + detection) while the camera is idle.
+  void _watchFrames(CameraController c) {
+    c.startImageStream(_onFrame).catchError((_) {}); // some devices cannot stream; hints are optional
+  }
+
+  // ---------- camera controls ----------
   Future<void> _toggleTorch() async {
     final c = _controller;
     if (c == null) return;
@@ -138,7 +248,24 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     if (c == null || _recording) return;
     try {
       if (c.value.isStreamingImages) await c.stopImageStream();
-      await c.startVideoRecording();
+      var liveWhileRecording = false;
+      if (_liveEnabled && _detector != null) {
+        try {
+          await c.startVideoRecording(onAvailable: _onFrame); // boxes keep updating while recording
+          liveWhileRecording = true;
+        } on CameraException {
+          // this phone cannot analyse frames while recording: record normally, just without live boxes
+        }
+      }
+      if (!liveWhileRecording) {
+        if (!c.value.isRecordingVideo) await c.startVideoRecording();
+        if (_liveEnabled && _detector != null && mounted) {
+          setState(() {
+            _boxes = const [];
+            _liveNote = 'Live boxes pause while recording on this phone.';
+          });
+        }
+      }
       setState(() {
         _recording = true;
         _seconds = 0;
@@ -167,7 +294,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Too short. Record at least a few seconds.')));
         }
-        _watchLight(c);
+        _watchFrames(c);
         return;
       }
       if (mounted) context.pop(file.path);
@@ -195,6 +322,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     return '$m:$s';
   }
 
+  // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
     final c = _controller;
@@ -224,6 +352,38 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         ),
       );
 
+  /// Counts and hints from the latest live detections.
+  Widget _liveStatus() {
+    if (!_liveEnabled) return const SizedBox.shrink();
+    if (_preparing) {
+      final p = _modelProgress;
+      return _Pill(
+        text: p == null ? 'Preparing live detection…' : 'Downloading live detection… ${(p * 100).round()}%',
+        leading: const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+      );
+    }
+    if (_detector == null) {
+      return _liveNote == null ? const SizedBox.shrink() : _Pill(text: _liveNote!, color: Colors.black54);
+    }
+    final violations = _boxes.where((b) => b.isViolation).length;
+    final tooFar = _boxes.isNotEmpty && _boxes.any((b) => b.height < _tooFarHeight);
+    return Column(children: [
+      _Pill(
+        text: _boxes.isEmpty ? 'No people in view' : '${_boxes.length} in view · $violations without helmet',
+        color: violations > 0 ? AppColors.danger.withValues(alpha: 0.9) : Colors.black54,
+        leading: Icon(violations > 0 ? Icons.warning_amber_rounded : Icons.visibility, color: Colors.white, size: 16),
+      ),
+      if (tooFar) ...[
+        const SizedBox(height: 6),
+        _Pill(
+          text: 'Some people are too far. Move closer or zoom in.',
+          color: AppColors.warning.withValues(alpha: 0.92),
+          leading: const Icon(Icons.zoom_in, color: Colors.white, size: 16),
+        ),
+      ],
+    ]);
+  }
+
   Widget _cameraView(CameraController c) {
     return Stack(fit: StackFit.expand, children: [
       Center(
@@ -239,7 +399,11 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                 setState(() {});
               }
             },
-            child: CameraPreview(c),
+            child: Stack(children: [
+              CameraPreview(c),
+              if (_liveEnabled && _boxes.isNotEmpty)
+                Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: BoxesPainter(_boxes)))),
+            ]),
           );
         }),
       ),
@@ -256,6 +420,12 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
               _Pill(text: _quality),
               if (_zoom > _minZoom + 0.05) _Pill(text: '${_zoom.toStringAsFixed(1)}x'),
               IconButton(
+                tooltip: _liveEnabled ? 'Live boxes on' : 'Live boxes off',
+                onPressed: _recording ? null : _toggleLive,
+                icon: Icon(_liveEnabled ? Icons.center_focus_strong : Icons.center_focus_weak,
+                    color: _liveEnabled ? Colors.lightGreenAccent : Colors.white),
+              ),
+              IconButton(
                 tooltip: 'Torch',
                 onPressed: _toggleTorch,
                 icon: Icon(_torch ? Icons.flash_on : Icons.flash_off, color: _torch ? Colors.amber : Colors.white),
@@ -265,18 +435,24 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
           if (_recording)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: _Pill(
-                text: '$_clock / 02:00',
-                leading: const Icon(Icons.fiber_manual_record, color: AppColors.danger, size: 14),
-              ),
+              child: Column(children: [
+                _Pill(
+                  text: '$_clock / 02:00',
+                  leading: const Icon(Icons.fiber_manual_record, color: AppColors.danger, size: 14),
+                ),
+                const SizedBox(height: 6),
+                _liveStatus(),
+              ]),
             )
           else
             Padding(
               padding: const EdgeInsets.only(top: 6, left: 24, right: 24),
               child: Column(children: [
                 const _Pill(text: 'Hold steady · keep people fully in frame · tap to focus'),
+                const SizedBox(height: 6),
+                _liveStatus(),
                 if (_lowLight) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   _Pill(
                     text: 'Too dark. Turn on the torch or move to better light.',
                     color: AppColors.warning.withValues(alpha: 0.92),

@@ -42,6 +42,7 @@ dependencies:
   camera: ^0.12.1
   share_plus: ^13.3.1
   path_provider: ^2.1.6
+  onnxruntime: ^1.4.1
 
 dev_dependencies:
   flutter_test:

@@ -193,6 +193,23 @@ class Api {
         return r.data!;
       });
 
+  /// Version, size and input size of the on-device detection model offered by the server.
+  Future<Map<String, dynamic>> liveModelInfo() => _guard(() async {
+        final r = await _dio.get('/app/live-model/info');
+        return Map<String, dynamic>.from(r.data as Map);
+      });
+
+  Future<void> downloadFile(String path, String savePath, void Function(double) onProgress) => _guard(() async {
+        await _dio.download(
+          path,
+          savePath,
+          onReceiveProgress: (got, total) {
+            if (total > 0) onProgress(got / total);
+          },
+          options: Options(receiveTimeout: const Duration(minutes: 3)),
+        );
+      });
+
   Future<void> deleteVideo(int id) => _guard(() async {
         await _dio.delete('/videos/$id');
       });
