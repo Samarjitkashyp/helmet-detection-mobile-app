@@ -1,0 +1,126 @@
+# Helmet Check: Mobile App
+
+Android app for helmet compliance checks. Record a short video in HD or pick one from the gallery, and the AI backend tells you **who is not wearing a helmet**, with a photo and timestamp for every person.
+
+![Flutter](https://img.shields.io/badge/Flutter-Android-02569B?logo=flutter&logoColor=white)
+![Dart](https://img.shields.io/badge/Dart-0175C2?logo=dart&logoColor=white)
+![Material 3](https://img.shields.io/badge/Material-3-6750A4?logo=materialdesign&logoColor=white)
+
+> **Backend:** [helmet-detection](https://github.com/Samarjitkashyp/helmet-detection) (FastAPI + YOLOv8 + admin dashboard). This app is its client.
+
+## Features
+
+- **In-app HD camera**: 1080p / 30 fps, tap-to-focus, pinch zoom, torch, live low-light hint, 2-minute auto-stop.
+- **Gallery upload**: size check before upload, with clear messages.
+- **Live progress**: upload progress, then background analysis with automatic status polling.
+- **Clear verdict**: one-glance result (safe / violations), counts, and filters.
+- **Photo evidence**: full-screen viewer with swipe and zoom, confidence and timestamp per person.
+- **Quality hints**: warns when the video was too dark or the model was unsure.
+- **Share report**: send the summary and photos via WhatsApp, email, etc.
+- **History**: all analyses with status badges, delete with confirmation.
+- **Accounts**: register / sign in with JWT, session kept across restarts.
+- **Polish**: onboarding, light and dark themes, Material 3.
+
+## Flow
+
+```mermaid
+flowchart LR
+    A[Record / pick video] --> B[Upload<br/>progress bar]
+    B --> C[Analyzing...<br/>status polling]
+    C --> D[Results<br/>verdict + photos]
+    D --> E[Share report]
+    D --> F[History]
+```
+
+## Tech stack
+
+| Area | Package |
+|---|---|
+| UI | Flutter, Material 3 |
+| Navigation | `go_router` |
+| State | `provider` |
+| Networking | `dio` |
+| Camera / picker | `camera`, `image_picker` |
+| Storage | `shared_preferences` |
+| Sharing | `share_plus`, `path_provider` |
+
+## Project structure
+
+```
+lib/
+  main.dart            entry point, dependency setup
+  app.dart             router and auth/onboarding redirects
+  app_theme.dart       light and dark themes, status colours
+  core/
+    api.dart           REST client (auth, upload, status, results)
+    auth_state.dart    login state and onboarding flag
+    models.dart        video, detection and result models
+    limits.dart        upload size cap and recording bitrate
+  screens/
+    welcome_screen.dart   onboarding
+    login_screen.dart     sign in / register
+    home_shell.dart       dashboard and navigation
+    record_screen.dart    HD camera
+    upload_screen.dart    upload with progress
+    results_screen.dart   verdict, filters, photo viewer, share
+    history_screen.dart   past analyses
+    server_dialog.dart    change server address
+```
+
+## Getting started
+
+Requires Flutter 3.x with the Android SDK, and a running [backend](https://github.com/Samarjitkashyp/helmet-detection).
+
+```bash
+flutter pub get
+flutter run --dart-define=API_URL=http://10.0.2.2:8000     # Android emulator -> backend on your PC
+flutter run --dart-define=API_URL=http://<PC-IP>:8000      # real phone on the same WiFi
+```
+
+Debug builds allow plain HTTP for local development. The server address can also be changed inside the app (server icon on the home screen, or on the login screen).
+
+## Configuration
+
+| Setting | Where | Notes |
+|---|---|---|
+| `API_URL` | `--dart-define` at build/run time | Backend base URL, e.g. `https://your-server.example.com` |
+| Server address | In-app dialog | Overrides the default at runtime; **Use default** resets it |
+| Upload limit / bitrate | `lib/core/limits.dart` | 95 MB cap (stays under common proxy limits), 5 Mbps recording |
+
+## Build a release APK
+
+```bash
+flutter build apk --release --split-per-abi --dart-define=API_URL=https://your-server.example.com
+```
+
+Output: `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (most modern phones). Release builds only talk to **HTTPS** servers.
+
+For the Play Store, create your own keystore and signing config; the template build is signed with the debug key, which is fine for sideloading.
+
+## Permissions
+
+| Permission | Why |
+|---|---|
+| `INTERNET` | Talk to the backend |
+| `CAMERA` | Record video (no microphone is used; videos are silent) |
+
+## Limitations
+
+- Android only for now; recording is limited to 2 minutes and uploads to 95 MB.
+- Detection accuracy depends on light, distance and focus. Follow the in-app tips for best results.
+- Needs an internet connection; analysis runs on the server.
+
+## Roadmap
+
+- iOS build
+- Hindi / English language switch
+- Push notification when analysis completes
+- Offline queue for uploads
+
+## License
+
+[MIT](LICENSE)
+
+## Author
+
+[Samarjitkashyp](https://github.com/Samarjitkashyp)
