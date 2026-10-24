@@ -99,7 +99,7 @@ For the Play Store, create your own keystore and signing config; the template bu
 
 ### Distribute without the Play Store
 
-Upload the APK in the backend's admin dashboard (**Settings → Mobile app**). Users then open `https://your-server.example.com/app` on their phone, tap **Download for Android**, and install it (Android asks to allow "Install unknown apps" once).
+In the backend's admin dashboard (**Settings → Mobile app**), upload the APK (a progress bar shows the upload), then press **Publish**. Users then open `https://your-server.example.com/app` on their phone, tap **Download for Android**, and install it (Android asks to allow "Install unknown apps" once).
 
 ## Permissions
 
