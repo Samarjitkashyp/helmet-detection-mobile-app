@@ -16,6 +16,18 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Where an interrupted chunked upload stands, kept by the screen so "Try again" can continue it.
+class UploadSession {
+  String? id;
+  int chunkSize = 2 * 1024 * 1024;
+  int offset = 0;
+
+  void reset() {
+    id = null;
+    offset = 0;
+  }
+}
+
 /// Talks to the FastAPI backend. The server address is editable in the app because a real phone
 /// needs the PC's LAN IP, while the Android emulator uses 10.0.2.2.
 class Api {
@@ -121,35 +133,60 @@ class Api {
 
   /// Uploads a video in small pieces. A single long request gets cut off by Cloudflare (error 524) on slow
   /// mobile connections, while small pieces finish quickly and each one can be retried on its own.
-  Future<VideoItem> uploadVideoChunked(String path, String filename, void Function(double) onProgress) =>
+  ///
+  /// Pass the same [session] again after a failure and the upload continues where it stopped instead of
+  /// starting over; [onStatus] reports retries so the screen can say the connection is slow.
+  Future<VideoItem> uploadVideoChunked(
+    String path,
+    String filename,
+    void Function(double) onProgress, {
+    UploadSession? session,
+    void Function(String?)? onStatus,
+  }) =>
       _guard(() async {
+        final s = session ?? UploadSession();
         final file = File(path);
         final total = await file.length();
-        final init = await _dio.post('/videos/uploads', data: {'filename': filename, 'size': total});
-        final uploadId = init.data['upload_id'] as String;
-        final chunkSize = init.data['chunk_size'] as int;
+
+        if (s.id != null) {
+          // continue an interrupted upload, but never past what the server has really received
+          try {
+            final st = await _dio.get('/videos/uploads/${s.id}');
+            s.offset = min(s.offset, (st.data['received'] as num).toInt());
+          } on DioException catch (e) {
+            if (e.response?.statusCode != 404) rethrow;
+            s.reset(); // the server forgot it (e.g. it was idle too long): start again
+          }
+        }
+        if (s.id == null) {
+          final init = await _dio.post('/videos/uploads', data: {'filename': filename, 'size': total});
+          s.id = init.data['upload_id'] as String;
+          s.chunkSize = init.data['chunk_size'] as int;
+          s.offset = 0;
+        }
 
         final reader = await file.open();
         try {
-          var offset = 0;
-          while (offset < total) {
-            final len = min(chunkSize, total - offset);
-            await reader.setPosition(offset);
+          while (s.offset < total) {
+            final len = min(s.chunkSize, total - s.offset);
+            await reader.setPosition(s.offset);
             final bytes = await reader.read(len);
-            await _putChunk(uploadId, offset, bytes);
-            offset += len;
-            onProgress(offset / total);
+            await _putChunk(s.id!, s.offset, bytes, onStatus);
+            s.offset += len;
+            onStatus?.call(null);
+            onProgress(s.offset / total);
           }
         } finally {
           await reader.close();
         }
-        final done = await _dio.post('/videos/uploads/$uploadId/complete');
+        final done = await _dio.post('/videos/uploads/${s.id}/complete');
+        s.reset();
         return VideoItem.fromJson(done.data as Map<String, dynamic>);
       });
 
   /// Sends one piece, retrying network drops and server/proxy errors (5xx, including Cloudflare 52x).
-  Future<void> _putChunk(String uploadId, int offset, Uint8List bytes) async {
-    const maxAttempts = 5;
+  Future<void> _putChunk(String uploadId, int offset, Uint8List bytes, void Function(String?)? onStatus) async {
+    const maxAttempts = 6;
     for (var attempt = 1;; attempt++) {
       try {
         await _dio.put(
@@ -167,7 +204,8 @@ class Api {
         final code = e.response?.statusCode;
         final retryable = code == null || code >= 500 || code == 408 || code == 429;
         if (!retryable || attempt >= maxAttempts) rethrow;
-        await Future<void>.delayed(Duration(seconds: 1 << (attempt - 1))); // 1, 2, 4, 8 s
+        onStatus?.call('Weak connection, retrying ($attempt/${maxAttempts - 1})…');
+        await Future<void>.delayed(Duration(seconds: min(8, 1 << (attempt - 1)))); // 1, 2, 4, 8, 8 s
       }
     }
   }

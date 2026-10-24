@@ -19,6 +19,8 @@ class _UploadScreenState extends State<UploadScreen> {
   double _progress = 0;
   bool _uploading = false;
   String? _error;
+  String? _status; // e.g. "Weak connection, retrying (2/5)…"
+  final UploadSession _session = UploadSession();
 
   late final int _bytes = _fileBytes();
 
@@ -41,12 +43,21 @@ class _UploadScreenState extends State<UploadScreen> {
     setState(() {
       _uploading = true;
       _error = null;
-      _progress = 0;
+      _status = null;
+      if (_session.id == null) _progress = 0;
     });
     try {
-      final video = await api.uploadVideoChunked(widget.path, _name, (p) {
-        if (mounted) setState(() => _progress = p);
-      });
+      final video = await api.uploadVideoChunked(
+        widget.path,
+        _name,
+        (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+        session: _session, // "Try again" continues from where the connection broke
+        onStatus: (s) {
+          if (mounted) setState(() => _status = s);
+        },
+      );
       if (mounted) context.pushReplacement('/results/${video.id}');
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -77,6 +88,10 @@ class _UploadScreenState extends State<UploadScreen> {
                 LinearProgressIndicator(value: _progress == 0 ? null : _progress, minHeight: 8),
                 const SizedBox(height: 8),
                 Text('Uploading... ${(_progress * 100).toStringAsFixed(0)}%', textAlign: TextAlign.center),
+                if (_status != null) ...[
+                  const SizedBox(height: 6),
+                  Text(_status!, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.tertiary)),
+                ],
               ] else
                 FilledButton.icon(
                   onPressed: _tooBig ? null : _upload,
