@@ -44,7 +44,7 @@ class _UploadScreenState extends State<UploadScreen> {
       _progress = 0;
     });
     try {
-      final video = await api.uploadVideo(widget.path, _name, (p) {
+      final video = await api.uploadVideoChunked(widget.path, _name, (p) {
         if (mounted) setState(() => _progress = p);
       });
       if (mounted) context.pushReplacement('/results/${video.id}');

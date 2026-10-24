@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -114,6 +118,59 @@ class Api {
         );
         return VideoItem.fromJson(r.data as Map<String, dynamic>);
       });
+
+  /// Uploads a video in small pieces. A single long request gets cut off by Cloudflare (error 524) on slow
+  /// mobile connections, while small pieces finish quickly and each one can be retried on its own.
+  Future<VideoItem> uploadVideoChunked(String path, String filename, void Function(double) onProgress) =>
+      _guard(() async {
+        final file = File(path);
+        final total = await file.length();
+        final init = await _dio.post('/videos/uploads', data: {'filename': filename, 'size': total});
+        final uploadId = init.data['upload_id'] as String;
+        final chunkSize = init.data['chunk_size'] as int;
+
+        final reader = await file.open();
+        try {
+          var offset = 0;
+          while (offset < total) {
+            final len = min(chunkSize, total - offset);
+            await reader.setPosition(offset);
+            final bytes = await reader.read(len);
+            await _putChunk(uploadId, offset, bytes);
+            offset += len;
+            onProgress(offset / total);
+          }
+        } finally {
+          await reader.close();
+        }
+        final done = await _dio.post('/videos/uploads/$uploadId/complete');
+        return VideoItem.fromJson(done.data as Map<String, dynamic>);
+      });
+
+  /// Sends one piece, retrying network drops and server/proxy errors (5xx, including Cloudflare 52x).
+  Future<void> _putChunk(String uploadId, int offset, Uint8List bytes) async {
+    const maxAttempts = 5;
+    for (var attempt = 1;; attempt++) {
+      try {
+        await _dio.put(
+          '/videos/uploads/$uploadId',
+          queryParameters: {'offset': offset},
+          data: bytes,
+          options: Options(
+            contentType: 'application/octet-stream',
+            sendTimeout: const Duration(seconds: 90),
+            receiveTimeout: const Duration(seconds: 60),
+          ),
+        );
+        return;
+      } on DioException catch (e) {
+        final code = e.response?.statusCode;
+        final retryable = code == null || code >= 500 || code == 408 || code == 429;
+        if (!retryable || attempt >= maxAttempts) rethrow;
+        await Future<void>.delayed(Duration(seconds: 1 << (attempt - 1))); // 1, 2, 4, 8 s
+      }
+    }
+  }
 
   Future<List<VideoItem>> listVideos() => _guard(() async {
         final r = await _dio.get('/videos');
