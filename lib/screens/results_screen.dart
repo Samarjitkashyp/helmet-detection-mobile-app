@@ -113,10 +113,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
           ? 'No people were detected.'
           : r.violations == 0
               ? 'Everyone was wearing a helmet.'
-              : '${r.violations} of ${r.peopleChecked} people were NOT wearing a helmet.';
+              : '${r.violations} of ${r.peopleChecked} sightings were NOT wearing a helmet (the same person may appear more than once).';
       await SharePlus.instance.share(ShareParams(
         subject: 'Helmet Check report',
-        text: 'Helmet Check report\nVideo: ${r.video.filename}$when\nPeople checked: ${r.peopleChecked}\n$verdict',
+        text: 'Helmet Check report\nVideo: ${r.video.filename}$when\nSightings checked: ${r.peopleChecked}\n$verdict',
         files: files,
       ));
     } on ApiException catch (e) {
@@ -234,7 +234,7 @@ class _ResultsViewState extends State<_ResultsView> {
         ],
         const SizedBox(height: 16),
         Row(children: [
-          Expanded(child: _MiniStat(label: 'People checked', value: '${r.peopleChecked}', color: scheme.primary)),
+          Expanded(child: _MiniStat(label: 'Sightings', value: '${r.peopleChecked}', color: scheme.primary)),
           const SizedBox(width: 10),
           Expanded(child: _MiniStat(label: 'With helmet', value: '$safe', color: AppColors.success)),
           const SizedBox(width: 10),
@@ -283,13 +283,14 @@ class _Verdict extends StatelessWidget {
     } else if (r.violations > 0) {
       color = AppColors.danger;
       icon = Icons.warning_amber_rounded;
-      title = r.violations == 1 ? '1 person without a helmet' : '${r.violations} people without a helmet';
-      sub = 'Tap a photo below to see the proof and the exact time.';
+      title = r.violations == 1 ? '1 sighting without a helmet' : '${r.violations} sightings without a helmet';
+      sub = 'The same person can appear more than once (for example after a camera cut). '
+          'Check each photo and its time.';
     } else {
       color = AppColors.success;
       icon = Icons.verified_rounded;
       title = 'Everyone is wearing a helmet';
-      sub = '${r.peopleChecked} ${r.peopleChecked == 1 ? 'person' : 'people'} checked.';
+      sub = '${r.peopleChecked} ${r.peopleChecked == 1 ? 'sighting' : 'sightings'} checked.';
     }
     return Container(
       padding: const EdgeInsets.all(20),

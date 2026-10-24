@@ -158,7 +158,7 @@ class Api {
           data: bytes,
           options: Options(
             contentType: 'application/octet-stream',
-            sendTimeout: const Duration(seconds: 90),
+            sendTimeout: const Duration(seconds: 45), // a stalled piece is retried sooner
             receiveTimeout: const Duration(seconds: 60),
           ),
         );
