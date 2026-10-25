@@ -11,7 +11,7 @@ Android app for helmet compliance checks. Record a short video in HD or pick one
 ## Features
 
 - **In-app HD camera**: 1080p / 30 fps, tap-to-focus, pinch zoom, torch, live low-light hint, 2-minute auto-stop.
-- **Live detection boxes**: green (helmet) and red (no helmet) boxes drawn on the preview, also while recording, with a count and a "move closer" hint. The model runs on the phone (ONNX Runtime) and is downloaded from the backend on first use, so model updates need no new app release. The boxes are a framing guide; the final result comes from the server.
+- **Live detection boxes**: green (helmet) and red (no helmet) boxes drawn on the camera preview before you press record, with a count and a "move closer" hint. They pause while recording because the Android camera plugin turns the preview 90 degrees if frames are read during recording ([flutter/flutter#180075](https://github.com/flutter/flutter/issues/180075)); the saved video is unaffected. Flip `_liveWhileRecording` in `record_screen.dart` once that is fixed. The model runs on the phone (ONNX Runtime) and is downloaded from the backend on first use, so model updates need no new app release. The boxes are a framing guide; the final result comes from the server.
 - **Gallery upload**: size check before upload, with clear messages.
 - **Live progress**: upload progress, then background analysis with automatic status polling.
 - **Clear verdict**: one-glance result (safe / violations), counts, and filters.

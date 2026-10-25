@@ -30,6 +30,11 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   static const _tooFarHeight = 0.045; // box shorter than 4.5% of the frame height = person is too far away
   static const _liveKey = 'live_boxes';
 
+  /// Reading camera frames while a video is being recorded makes the Android camera plugin turn the *preview*
+  /// 90 degrees (the saved video stays correct): https://github.com/flutter/flutter/issues/180075
+  /// So live boxes are shown before recording only. Set to true once that issue is fixed in the plugin.
+  static const _liveWhileRecording = false;
+
   CameraController? _controller;
   String? _error;
   bool _recording = false;
@@ -249,7 +254,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     try {
       if (c.value.isStreamingImages) await c.stopImageStream();
       var liveWhileRecording = false;
-      if (_liveEnabled && _detector != null) {
+      if (_liveWhileRecording && _liveEnabled && _detector != null) {
         try {
           await c.startVideoRecording(onAvailable: _onFrame); // boxes keep updating while recording
           liveWhileRecording = true;
@@ -259,12 +264,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
       }
       if (!liveWhileRecording) {
         if (!c.value.isRecordingVideo) await c.startVideoRecording();
-        if (_liveEnabled && _detector != null && mounted) {
-          setState(() {
-            _boxes = const [];
-            _liveNote = 'Live boxes pause while recording on this phone.';
-          });
-        }
+        if (mounted) setState(() => _boxes = const []);
       }
       setState(() {
         _recording = true;
@@ -355,6 +355,9 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   /// Counts and hints from the latest live detections.
   Widget _liveStatus() {
     if (!_liveEnabled) return const SizedBox.shrink();
+    if (_recording && !_liveWhileRecording) {
+      return const _Pill(text: 'Live boxes are paused while recording', leading: Icon(Icons.pause_circle_outline, color: Colors.white, size: 16));
+    }
     if (_preparing) {
       final p = _modelProgress;
       return _Pill(
