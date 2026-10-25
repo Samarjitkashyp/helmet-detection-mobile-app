@@ -57,11 +57,16 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   bool _inferBusy = false;
   DateTime _lastInfer = DateTime.fromMillisecondsSinceEpoch(0);
 
+  // screen orientation: the screen follows how the phone is held (portrait / landscape either way), also when the
+  // phone's own auto-rotate is off. Frozen while recording; the lock button stops it following.
+  DeviceOrientation _ui = DeviceOrientation.portraitUp;
+  bool _autoRotate = true;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]); // boxes are mapped for portrait
+    SystemChrome.setPreferredOrientations([_ui]);
     _init();
     _loadLive();
   }
@@ -71,6 +76,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.removeObserver(this);
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     _timer?.cancel();
+    _controller?.removeListener(_onCamera);
     _controller?.dispose();
     final d = _detector;
     _detector = null;
@@ -88,6 +94,23 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     } else if (state == AppLifecycleState.resumed && _controller == null && !_recording) {
       _init();
     }
+  }
+
+  /// Turns the screen to match how the phone is held. The camera plugin reports this from the motion sensor,
+  /// so it works even when the phone's auto-rotate setting is off.
+  void _onCamera() {
+    final c = _controller;
+    if (c == null || !mounted || !_autoRotate || _recording) return;
+    final held = c.value.deviceOrientation;
+    if (held == _ui) return;
+    _ui = held;
+    SystemChrome.setPreferredOrientations([held]);
+    setState(() => _boxes = const []); // boxes drawn for the old orientation
+  }
+
+  void _toggleAutoRotate() {
+    setState(() => _autoRotate = !_autoRotate);
+    if (_autoRotate) _onCamera();
   }
 
   Future<CameraController> _open(CameraDescription cam, ResolutionPreset preset) async {
@@ -127,6 +150,8 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
         _controller = c;
         _error = null;
       });
+      c.addListener(_onCamera);
+      _onCamera();
       _watchFrames(c);
     } on CameraException catch (e) {
       if (mounted) {
@@ -220,7 +245,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
     }
     _inferBusy = true;
     _lastInfer = now;
-    detector.detect(frame, c.description.sensorOrientation).then((boxes) {
+    detector.detect(frame, LiveMath.uprightRotation(c.description.sensorOrientation, _ui)).then((boxes) {
       if (mounted && _liveEnabled) setState(() => _boxes = boxes);
     }).catchError((Object e) {
       _detector = null; // do not keep failing every frame
@@ -388,6 +413,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
   }
 
   Widget _cameraView(CameraController c) {
+    final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     return Stack(fit: StackFit.expand, children: [
       Center(
         child: LayoutBuilder(builder: (context, box) {
@@ -422,6 +448,12 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
               const Spacer(),
               _Pill(text: _quality),
               if (_zoom > _minZoom + 0.05) _Pill(text: '${_zoom.toStringAsFixed(1)}x'),
+              IconButton(
+                tooltip: _autoRotate ? 'Screen follows how you hold the phone' : 'Screen rotation locked',
+                onPressed: _recording ? null : _toggleAutoRotate,
+                icon: Icon(_autoRotate ? Icons.screen_rotation : Icons.screen_lock_rotation,
+                    color: _autoRotate ? Colors.white : Colors.amber),
+              ),
               IconButton(
                 tooltip: _liveEnabled ? 'Live boxes on' : 'Live boxes off',
                 onPressed: _recording ? null : _toggleLive,
@@ -464,9 +496,14 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
                 ],
               ]),
             ),
-          const Spacer(),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 28),
+        ]),
+      ),
+      // record button: bottom centre when held upright, right edge when held sideways
+      SafeArea(
+        child: Align(
+          alignment: landscape ? Alignment.centerRight : Alignment.bottomCenter,
+          child: Padding(
+            padding: landscape ? const EdgeInsets.only(right: 20) : const EdgeInsets.only(bottom: 28),
             child: GestureDetector(
               onTap: _recording ? _stop : _start,
               child: Container(
@@ -485,7 +522,7 @@ class _RecordScreenState extends State<RecordScreen> with WidgetsBindingObserver
               ),
             ),
           ),
-        ]),
+        ),
       ),
     ]);
   }

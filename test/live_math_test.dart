@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show DeviceOrientation;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:helmet_app/live/live_detector.dart';
 
@@ -26,6 +27,21 @@ List<List<int>> _rotateCw(List<List<int>> m) {
 }
 
 void main() {
+  group('uprightRotation (back camera, sensor mounted at 90)', () {
+    test('turns the frame by sensorOrientation minus how far the phone is turned counter-clockwise', () {
+      expect(LiveMath.uprightRotation(90, DeviceOrientation.portraitUp), 90);
+      expect(LiveMath.uprightRotation(90, DeviceOrientation.landscapeLeft), 0);
+      expect(LiveMath.uprightRotation(90, DeviceOrientation.portraitDown), 270);
+      expect(LiveMath.uprightRotation(90, DeviceOrientation.landscapeRight), 180);
+    });
+
+    test('also works for a sensor mounted at 270 or 0', () {
+      expect(LiveMath.uprightRotation(270, DeviceOrientation.portraitUp), 270);
+      expect(LiveMath.uprightRotation(270, DeviceOrientation.landscapeLeft), 180);
+      expect(LiveMath.uprightRotation(0, DeviceOrientation.landscapeLeft), 270);
+    });
+  });
+
   group('buildInput', () {
     for (final rotation in [0, 90, 180, 270]) {
       test('rotation $rotation puts every source pixel in the right upright place', () {

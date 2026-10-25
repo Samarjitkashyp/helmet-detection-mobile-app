@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart' show DeviceOrientation;
 import 'package:onnxruntime/onnxruntime.dart';
 
 /// One camera frame in YUV 4:2:0 layout (what Android cameras deliver), independent of the camera plugin
@@ -79,6 +80,19 @@ class LiveBox {
 /// Pure helpers: frame -> model input, model output -> boxes.
 class LiveMath {
   static const int padValue = 114;
+
+  /// Clockwise turn (0/90/180/270) that makes a camera frame upright on a screen shown in [ui] orientation.
+  /// Android: (sensorOrientation - displayRotation + 360) % 360 for back cameras, where the display rotation is
+  /// how far the phone is turned counter-clockwise from portrait (landscapeLeft = 90).
+  static int uprightRotation(int sensorOrientation, DeviceOrientation ui) {
+    final ccw = switch (ui) {
+      DeviceOrientation.portraitUp => 0,
+      DeviceOrientation.landscapeLeft => 90,
+      DeviceOrientation.portraitDown => 180,
+      DeviceOrientation.landscapeRight => 270,
+    };
+    return (sensorOrientation - ccw + 360) % 360;
+  }
 
   /// Builds the CHW float tensor (RGB, 0..1) for the model. [rotation] is the clockwise turn (0/90/180/270)
   /// that makes the sensor image upright. Each model pixel averages 2x2 source samples to avoid aliasing.

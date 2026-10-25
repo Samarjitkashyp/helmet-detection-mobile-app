@@ -120,7 +120,7 @@ In the backend's admin dashboard (**Settings → Mobile app**), upload the APK (
 - Detection accuracy depends on light, distance and focus. Follow the in-app tips for best results.
 - Needs an internet connection; analysis runs on the server.
 - Live boxes download a ~45 MB model on first use (Wi-Fi recommended), run on ARM phones only (the x86 emulator is not supported), use more battery, and are less exact than the server analysis.
-- Recording is portrait-only so the boxes line up with the preview.
+- The recording screen follows how the phone is held (portrait or landscape, either way) using the motion sensor, even if the phone's auto-rotate is off; a lock button keeps it fixed, and it never turns during a recording.
 
 ## Roadmap
 
