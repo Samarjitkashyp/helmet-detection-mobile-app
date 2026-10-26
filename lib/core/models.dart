@@ -83,3 +83,46 @@ class VideoResults {
         warnings: ((j['warnings'] as List?) ?? []).map((e) => e.toString()).toList(),
       );
 }
+
+/// One alert raised by the CCTV worker (a photo and the number of the camera that saw it).
+class CctvEvent {
+  CctvEvent({
+    required this.id,
+    required this.cameraName,
+    required this.confidence,
+    required this.createdAt,
+    this.photoUrl,
+    this.isFalsePositive = false,
+  });
+
+  final int id;
+  final String cameraName;
+  final double confidence;
+  final DateTime? createdAt; // server time, shown as it is
+  final String? photoUrl; // server path, needs the login header
+  bool isFalsePositive;
+
+  factory CctvEvent.fromJson(Map<String, dynamic> j) => CctvEvent(
+        id: j['id'] as int,
+        cameraName: j['camera_name'] as String,
+        confidence: (j['confidence'] as num).toDouble(),
+        createdAt: j['created_at'] == null ? null : DateTime.tryParse(j['created_at'] as String),
+        photoUrl: j['photo_url'] as String?,
+        isFalsePositive: j['is_false_positive'] as bool? ?? false,
+      );
+}
+
+/// Is the CCTV worker alive, and which cameras exist.
+class CctvStatus {
+  CctvStatus({required this.workerOnline, this.secondsSinceHeartbeat, this.cameraCount = 0});
+
+  final bool workerOnline;
+  final int? secondsSinceHeartbeat; // null = the worker has never reported
+  final int cameraCount;
+
+  factory CctvStatus.fromJson(Map<String, dynamic> j) => CctvStatus(
+        workerOnline: j['worker_online'] as bool? ?? false,
+        secondsSinceHeartbeat: (j['worker_seconds_since_heartbeat'] as num?)?.toInt(),
+        cameraCount: (j['cameras'] as List?)?.length ?? 0,
+      );
+}

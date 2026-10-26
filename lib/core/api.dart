@@ -109,9 +109,16 @@ class Api {
     }
   }
 
-  Future<String> login(String email, String password) => _guard(() async {
+  /// Signs in and returns the access token together with the account's role (`admin` or `user`).
+  Future<({String token, String role})> login(String email, String password) => _guard(() async {
         final r = await _dio.post('/auth/login', data: {'email': email, 'password': password});
-        return r.data['access_token'] as String;
+        return (token: r.data['access_token'] as String, role: (r.data['role'] as String?) ?? 'user');
+      });
+
+  /// The signed-in account's role, for sessions that were opened before the app remembered it.
+  Future<String> myRole() => _guard(() async {
+        final r = await _dio.get('/auth/me');
+        return (r.data['role'] as String?) ?? 'user';
       });
 
   Future<void> register(String name, String email, String password) => _guard(() async {
@@ -250,5 +257,28 @@ class Api {
 
   Future<void> deleteVideo(int id) => _guard(() async {
         await _dio.delete('/videos/$id');
+      });
+
+  // ---- CCTV alerts (admin accounts only) ----
+
+  /// Newest first. [sinceId] returns only newer events (for polling), [beforeId] pages back in time.
+  Future<List<CctvEvent>> cctvEvents({int sinceId = 0, int beforeId = 0, int limit = 30}) => _guard(() async {
+        final r = await _dio.get('/cctv/events', queryParameters: {
+          if (sinceId > 0) 'since_id': sinceId,
+          if (beforeId > 0) 'before_id': beforeId,
+          'limit': limit,
+        });
+        return (r.data as List).map((e) => CctvEvent.fromJson(e as Map<String, dynamic>)).toList();
+      });
+
+  Future<CctvStatus> cctvStatus() => _guard(() async {
+        final r = await _dio.get('/cctv/status');
+        return CctvStatus.fromJson(r.data as Map<String, dynamic>);
+      });
+
+  /// Marks an alert as a mistake (or undoes that); returns the new state.
+  Future<bool> toggleCctvFalsePositive(int id) => _guard(() async {
+        final r = await _dio.post('/cctv/events/$id/false-positive');
+        return r.data['is_false_positive'] as bool;
       });
 }

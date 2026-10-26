@@ -7,6 +7,7 @@ import '../app_theme.dart';
 import '../core/api.dart';
 import '../core/auth_state.dart';
 import '../core/models.dart';
+import 'events_screen.dart';
 import 'history_screen.dart';
 import 'server_dialog.dart';
 
@@ -21,11 +22,20 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   @override
+  void initState() {
+    super.initState();
+    context.read<AuthState>().ensureRole(); // sessions from an older app version have no stored role yet
+  }
+
+  @override
   Widget build(BuildContext context) {
     final api = context.read<Api>();
+    final isAdmin = context.watch<AuthState>().isAdmin;
+    if (!isAdmin && _index > 1) _index = 0;
+    const titles = ['Helmet Check', 'History', 'CCTV alerts'];
     return Scaffold(
       appBar: AppBar(
-        title: Text(_index == 0 ? 'Helmet Check' : 'History'),
+        title: Text(titles[_index]),
         actions: [
           IconButton(
             tooltip: 'Server address',
@@ -39,13 +49,15 @@ class _HomeShellState extends State<HomeShell> {
           ),
         ],
       ),
-      body: SafeArea(child: _index == 0 ? const _HomeTab() : const HistoryScreen()),
+      body: SafeArea(child: switch (_index) { 0 => const _HomeTab(), 1 => const HistoryScreen(), _ => const EventsScreen() }),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: 'Check'),
-          NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.shield_outlined), selectedIcon: Icon(Icons.shield), label: 'Check'),
+          const NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+          if (isAdmin)
+            const NavigationDestination(icon: Icon(Icons.notifications_outlined), selectedIcon: Icon(Icons.notifications), label: 'Alerts'),
         ],
       ),
     );
