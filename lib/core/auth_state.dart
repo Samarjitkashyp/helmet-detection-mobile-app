@@ -63,5 +63,12 @@ class AuthState extends ChangeNotifier {
     await login(email, password);
   }
 
-  Future<void> logout() => _setToken(null);
+  /// Set by PushService: removes this phone's push token while the session is still valid.
+  Future<void> Function()? onBeforeLogout;
+
+  Future<void> logout() async {
+    final before = onBeforeLogout;
+    if (before != null && token != null) await before();
+    await _setToken(null);
+  }
 }

@@ -276,6 +276,15 @@ class Api {
         return CctvStatus.fromJson(r.data as Map<String, dynamic>);
       });
 
+  /// Phone push token (Firebase). Admin accounts only; the server keeps one row per token.
+  Future<void> registerDevice(String token) => _guard(() async {
+        await _dio.post('/cctv/devices', data: {'token': token});
+      });
+
+  Future<void> unregisterDevice(String token) => _guard(() async {
+        await _dio.delete('/cctv/devices', data: {'token': token});
+      });
+
   /// Marks an alert as a mistake (or undoes that); returns the new state.
   Future<bool> toggleCctvFalsePositive(int id) => _guard(() async {
         final r = await _dio.post('/cctv/events/$id/false-positive');
